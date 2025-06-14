@@ -1,0 +1,17 @@
+{
+  "name": "betr-helper",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Mirko Nosenzo (@netnose)",
+  "description": "BETRHelper contract",
+  "scripts": {
+    "test": "hardhat test",
+    "coverage": "SOLIDITY_COVERAGE=true hardhat coverage",
+    "compile": "hardhat compile",
+    "deploy": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-viem": "^3.0.0",
+    "hardhat": "^2.24.3"
+  }
+}
