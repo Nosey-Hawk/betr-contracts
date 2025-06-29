@@ -73,6 +73,15 @@ contract BETRHelper {
     event AvailableCallsUpdated(uint256 newAmount);
 
     /*
+     * @title Called
+     * @notice Event to notify when a subcall is performed
+     * @param amount The amount that was passed to the subcall
+     * @param smartContract The smart contract that was called
+     * @param data The data that was passed to the subcall
+     */
+    event Called(uint256 indexed amount, address indexed smartContract, bytes data);
+
+    /*
      * @title onlyOwner
      * @notice Modifier to check if the caller is the owner
      */
@@ -140,7 +149,8 @@ contract BETRHelper {
      * @param _data The data to call the smart contract with
      */
     function subcall(uint256 _amount, address _smartContract, bytes calldata _data) public enoughSubcallsAvailable(_amount) payable returns (bytes memory result) {
-        return _performSubcall(_smartContract, _data, msg.value);
+        result = _performSubcall(_smartContract, _data, msg.value);
+        emit Called(_amount, _smartContract, _data);
     }
 
     /*
@@ -156,6 +166,7 @@ contract BETRHelper {
         for (uint256 i = 0; i < _amount; i++) {
             results[i] = _performSubcall(_smartContract, _data, value);
         }
+        emit Called(_amount, _smartContract, _data);
     }
 
     /*

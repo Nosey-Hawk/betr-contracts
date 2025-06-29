@@ -138,7 +138,7 @@ describe("BETRHelper", function () {
         functionName: "testSuccess",
         args: []
       });
-      await expect(betrHelper.write.subcall([1n, mock.address, data])).not.to.be.rejected;
+      expect(await betrHelper.write.subcall([1n, mock.address, data])).to.emit(betrHelper, "Called").withArgs(1n, mock.address, data);
       expect(await mock.read.getCalls()).to.equal(1n);
     });
 
@@ -200,7 +200,7 @@ describe("BETRHelper", function () {
         functionName: "testSuccess",
         args: []
       });
-      await expect(betrHelper.write.loopSubcall([5n, mock.address, data])).not.to.be.rejected;
+      expect(await betrHelper.write.loopSubcall([5n, mock.address, data])).to.emit(betrHelper, "Called").withArgs(5n, mock.address, data);
       expect(await mock.read.getCalls()).to.equal(5n);
     });
 
