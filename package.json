@@ -11,6 +11,7 @@
     "deploy": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",
     "@nomicfoundation/hardhat-toolbox-viem": "^3.0.0",
     "hardhat": "^2.24.3"
   }

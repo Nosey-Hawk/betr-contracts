@@ -71,22 +71,15 @@ describe("BETRHelper", function () {
       });
       await publicClient.waitForTransactionReceipt({ hash });
 
-      hash = await betrHelper.write.acceptOwnership({
+      expect(await betrHelper.write.acceptOwnership({
         account: otherAccount.account
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
+      })).to.emit(betrHelper, "OwnershipTransferred").withArgs(owner.account.address, otherAccount.account.address);
 
       expect((await betrHelper.read.owner()).toLocaleLowerCase()).to.equal(otherAccount.account.address.toLocaleLowerCase());
-
-      const ownershipUpdatedEvent = await betrHelper.getEvents.OwnershipTransferred();
-      expect(ownershipUpdatedEvent.length).to.equal(1);
-      const event = ownershipUpdatedEvent[0];
-      expect(event?.args.previousOwner?.toLocaleLowerCase()).to.equal(owner.account.address.toLocaleLowerCase());
-      expect(event?.args.newOwner?.toLocaleLowerCase()).to.equal(otherAccount.account.address.toLocaleLowerCase());
     });
 
     it("Should not accept the ownership transfer if the sender is not the proposed owner", async function () {
-      const { betrHelper, owner, otherAccount } = await loadFixture(deployBETRHelperFixture);
+      const { betrHelper, otherAccount } = await loadFixture(deployBETRHelperFixture);
       await expect(betrHelper.write.acceptOwnership({
         account: otherAccount.account
       })).to.be.rejectedWith("NotProposedOwner");
@@ -119,15 +112,10 @@ describe("BETRHelper", function () {
   describe("Available calls", function () {
     it("Should set the available calls", async function () {
       const { betrHelper, owner } = await loadFixture(deployBETRHelperFixture);
-      await betrHelper.write.setAvailableCalls([100n], {
+      expect(await betrHelper.write.setAvailableCalls([100n], {
         account: owner.account
-      });
+      })).to.emit(betrHelper, "AvailableCallsUpdated").withArgs(100n);
       expect(await betrHelper.read.availableCalls()).to.equal(100n);
-
-      const availableCallsUpdatedEvent = await betrHelper.getEvents.AvailableCallsUpdated();
-      expect(availableCallsUpdatedEvent.length).to.equal(1);
-      const event = availableCallsUpdatedEvent[0];
-      expect(event?.args.newAmount).to.equal(100n);
     });
 
     it("Should not set the available calls if the sender is not the owner", async function () {
@@ -283,7 +271,7 @@ describe("BETRHelper", function () {
           args: []
         })
       ];
-      await expect(betrHelper.write.multiCall([smartContracts, data, values])).not.to.be.rejected;
+      await expect(betrHelper.write.multiCall([smartContracts, data, values])).to.be.fulfilled;
       expect(await mock.read.getCalls()).to.equal(2n);
     });
 
@@ -377,9 +365,10 @@ describe("BETRHelper", function () {
 
       const ownerBalance = await publicClient.getBalance({ address: owner.account.address });
       const betrHelperBalance = await publicClient.getBalance({ address: betrHelper.address });
+      expect(betrHelperBalance).to.be.equal(parseEther("1"));
       await expect(betrHelper.write.recoverETH({
         account: otherAccount.account
-      })).not.to.be.rejected;
+      })).to.be.fulfilled;
       expect(await publicClient.getBalance({ address: owner.account.address })).to.equal(ownerBalance + betrHelperBalance);
     });
   });
