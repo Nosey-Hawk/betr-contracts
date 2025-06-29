@@ -50,6 +50,14 @@ contract BETRHelper {
     error NotProposedOwner();
 
     /*
+     * @title NotEnoughValue
+     * @notice Error to check if the value is not enough
+     * @param required The required value
+     * @param provided The provided value
+     */
+    error NotEnoughValue(uint256 required, uint256 provided);
+
+    /*
      * @title OwnershipTransferred
      * @notice Event to notify when ownership is transferred
      * @param previousOwner The previous owner
@@ -164,6 +172,12 @@ contract BETRHelper {
     ) public payable returns (bytes[] memory results) {
         if (_smartContracts.length == 0) revert InvalidInput();
         if (_smartContracts.length != _datas.length || _smartContracts.length != _values.length) revert InvalidInput();
+
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < _values.length; i++) {
+            totalValue += _values[i];
+        }
+        if (msg.value < totalValue) revert NotEnoughValue(totalValue, msg.value);
 
         results = new bytes[](_smartContracts.length);
         for (uint256 i = 0; i < _smartContracts.length; i++) {

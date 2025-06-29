@@ -344,6 +344,26 @@ describe("BETRHelper", function () {
 
       await expect(betrHelper.write.multiCall([[], [], []])).to.be.rejectedWith("InvalidInput");
     });
+
+    it("Should revert if the value is not enough", async function () {
+      const { betrHelper, owner, mock } = await loadFixture(deployBETRHelperFixture);
+      await betrHelper.write.setAvailableCalls([100n], {
+        account: owner.account
+      });
+
+      await expect(betrHelper.write.multiCall([[mock.address, mock.address], [encodeFunctionData({
+        abi: mock.abi,
+        functionName: "testSuccess",
+        args: []
+      }), encodeFunctionData({
+        abi: mock.abi,
+        functionName: "testSuccess",
+        args: []
+      })], [parseEther("0.3"), parseEther("0.3")]], {
+        account: owner.account,
+        value: parseEther("0.5")
+      })).to.be.rejectedWith("NotEnoughValue");
+    });
   });
 
   describe("Recover ETH", function () {
