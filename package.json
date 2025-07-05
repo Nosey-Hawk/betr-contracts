@@ -8,11 +8,16 @@
     "test": "hardhat test",
     "coverage": "SOLIDITY_COVERAGE=true hardhat coverage",
     "compile": "hardhat compile",
-    "deploy": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base"
+    "deploy:helper": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base",
+    "deploy:erc20payer": "hardhat ignition deploy ./ignition/modules/BETRERC20Payer.ts --network base"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",
     "@nomicfoundation/hardhat-toolbox-viem": "^3.0.0",
     "hardhat": "^2.24.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.3.0",
+    "@uniswap/v3-core": "^1.0.1"
   }
 }
