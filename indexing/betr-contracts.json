@@ -1,0 +1,51 @@
+{
+  "version": "1",
+  "name": "betr-contracts",
+  "abis": {
+    "betrStaking": {
+      "path": "./betr-staking.abi.json"
+    }
+  },
+  "instances": [
+    {
+      "abi": "betrStaking",
+      "address": "0x43Fe3f90815DF795eb9672556eCCBb70a460ec0c",
+      "startBlock": 33592611,
+      "chain": "base",
+      "enrich": {
+        "handlers": {
+          "Staked(indexed address,indexed uint256)": {
+            "calls": {
+              "stakedAmount": {
+                "name": "stakedAmount",
+                "params": "event.params.staker",
+                "required": true
+              }
+            },
+            "entities": {
+              "StakerBalance": {
+                "staker address": "event.params.staker.toHexString()",
+                "balance uint256": "calls.stakedAmount"
+              }
+            }
+          },
+          "Unstaked(indexed address,indexed uint256)": {
+            "calls": {
+              "stakedAmount": {
+                "name": "stakedAmount",
+                "params": "event.params.staker",
+                "required": true
+              }
+            },
+            "entities": {
+              "StakerBalance": {
+                "staker address": "event.params.staker.toHexString()",
+                "balance uint256": "calls.stakedAmount"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
