@@ -1,15 +1,16 @@
 {
-  "name": "betr-helper",
+  "name": "betr-contracts",
   "version": "1.1.0",
   "license": "MIT",
   "author": "Mirko Nosenzo (@netnose)",
-  "description": "BETRHelper contract",
+  "description": "BETR contracts",
   "scripts": {
     "test": "hardhat test",
     "coverage": "SOLIDITY_COVERAGE=true hardhat coverage",
     "compile": "hardhat compile",
     "deploy:helper": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base",
-    "deploy:erc20payer": "hardhat ignition deploy ./ignition/modules/BETRERC20Payer.ts --network base"
+    "deploy:erc20payer": "hardhat ignition deploy ./ignition/modules/BETRERC20Payer.ts --network base",
+    "deploy:staking": "hardhat ignition deploy ./ignition/modules/BETRStaking.ts --network base --parameters ignition/parameters.json"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",

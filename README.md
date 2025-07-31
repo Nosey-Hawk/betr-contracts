@@ -1,3 +1,3 @@
-# BETRHelper Contract
+# BETR Contracts
 
-This is an helper contract to simplify onchain operations during BETRMINT rounds.
+This is a collection of contracts that simplify onchain BETRMINT operations.
