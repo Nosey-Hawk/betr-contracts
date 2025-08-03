@@ -1,5 +1,8 @@
 {
   "BETRStakingModule": {
     "stakingToken": "0x051024B653E8ec69E72693F776c41C2A9401FB07"
+  },
+  "BETRRewardsModule": {
+    "stakingContract": "0x0000000000000000000000000000000000000000"
   }
 }
