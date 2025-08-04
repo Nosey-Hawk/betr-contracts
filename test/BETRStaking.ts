@@ -217,12 +217,6 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(stakeAmount);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stakeAmount);
-      
-      // Check stakers array
-      const stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(stakers[0].toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
     });
 
     it("Should stake multiple times", async function () {
@@ -249,11 +243,6 @@ describe("BETRStaking", function () {
       // Check total staked after first stake
       expect(await betrStaking.read.totalStakedAmount()).to.equal(firstStake);
 
-      // Check stakers array after first stake
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-
       // Second stake
       await betrStaking.write.stake([secondStake], {
         account: staker1.account
@@ -262,11 +251,6 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(firstStake + secondStake);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(firstStake + secondStake);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(firstStake + secondStake);
-      
-      // Check stakers array after second stake (should still be 1 since same user)
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
     });
 
     it("Should revert if staking is paused", async function () {
@@ -341,6 +325,14 @@ describe("BETRStaking", function () {
     it("Should stake tokens for another user successfully", async function () {
       const { betrStaking, mockToken, staker1, otherAccount, owner } = await loadFixture(deployBETRStakingFixture);
 
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
+
       // Fund the caller (otherAccount) with tokens
       await mockToken.write.mint([otherAccount.account.address, parseEther("1000")], {
         account: owner.account
@@ -353,6 +345,10 @@ describe("BETRStaking", function () {
 
       const stakeAmount = parseEther("100");
 
+      // Verify initial state
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(0n);
+
       expect(await betrStaking.write.stakeFor([staker1.account.address, stakeAmount], {
         account: otherAccount.account
       })).to.emit(betrStaking, "Staked").withArgs(staker1.account.address, stakeAmount);
@@ -360,16 +356,29 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(stakeAmount);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stakeAmount);
+
+      // Verify rewarder was called
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
       
-      // Check stakers array
-      const stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(stakers[0].toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
+      // Verify the call details
+      const [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stakeAmount);
+      expect(callIndex).to.equal(1n);
     });
 
     it("Should stake for multiple users", async function () {
       const { betrStaking, mockToken, staker1, staker2, otherAccount, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
 
       // Fund the caller with tokens
       await mockToken.write.mint([otherAccount.account.address, parseEther("1000")], {
@@ -384,6 +393,9 @@ describe("BETRStaking", function () {
       const stake1 = parseEther("100");
       const stake2 = parseEther("200");
 
+      // Verify initial state
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
+
       // Stake for first user
       await betrStaking.write.stakeFor([staker1.account.address, stake1], {
         account: otherAccount.account
@@ -392,10 +404,9 @@ describe("BETRStaking", function () {
       // Check total staked after first stake
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1);
 
-      // Check stakers array after first stake
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
+      // Verify first rewarder call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
 
       // Stake for second user
       await betrStaking.write.stakeFor([staker2.account.address, stake2], {
@@ -406,18 +417,35 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(stake2);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(stake1 + stake2);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1 + stake2);
+
+      // Verify second rewarder call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(2n);
+      expect(await mockRewarder.read.getUserCalls([staker2.account.address])).to.equal(1n);
+
+      // Verify call details for both users
+      let [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stake1);
+      expect(callIndex).to.equal(1n);
       
-      // Check stakers array after second stake
-      stakers = await betrStaking.read.stakers();
-      stakers = stakers.map(staker => staker.toLocaleLowerCase()) as `0x${string}`[];
-      expect(stakers).to.have.lengthOf(2);
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-      expect(stakers).to.include(staker1.account.address.toLocaleLowerCase());
-      expect(stakers).to.include(staker2.account.address.toLocaleLowerCase());
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker2.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker2.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stake2);
+      expect(callIndex).to.equal(2n);
     });
 
     it("Should stake multiple times for the same user", async function () {
       const { betrStaking, mockToken, staker1, otherAccount, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
 
       // Fund the caller with tokens
       await mockToken.write.mint([otherAccount.account.address, parseEther("1000")], {
@@ -432,6 +460,10 @@ describe("BETRStaking", function () {
       const firstStake = parseEther("50");
       const secondStake = parseEther("75");
 
+      // Verify initial state
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(0n);
+
       // First stake for user
       await betrStaking.write.stakeFor([staker1.account.address, firstStake], {
         account: otherAccount.account
@@ -440,10 +472,9 @@ describe("BETRStaking", function () {
       // Check total staked after first stake
       expect(await betrStaking.read.totalStakedAmount()).to.equal(firstStake);
 
-      // Check stakers array after first stake
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
+      // Verify first rewarder call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
 
       // Second stake for same user
       await betrStaking.write.stakeFor([staker1.account.address, secondStake], {
@@ -453,15 +484,32 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(firstStake + secondStake);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(firstStake + secondStake);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(firstStake + secondStake);
-      
-      // Check stakers array after second stake (should still be 1 since same user)
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
+
+      // Verify second rewarder call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(2n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(2n);
+
+      // Verify call details for both stakes
+      let [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(firstStake);
+      expect(newAmount).to.equal(firstStake + secondStake);
+      expect(callIndex).to.equal(2n);
+
+      // Verify user has multiple stake changes recorded
+      expect(await mockRewarder.read.getUserStakeChangesCount([staker1.account.address])).to.equal(2n);
     });
 
     it("Should revert if staking is paused", async function () {
       const { betrStaking, mockToken, staker1, otherAccount, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
 
       // Pause staking
       await betrStaking.write.setStakingPaused([true], {
@@ -481,6 +529,9 @@ describe("BETRStaking", function () {
       await expect(betrStaking.write.stakeFor([staker1.account.address, parseEther("100")], {
         account: otherAccount.account
       })).to.be.rejectedWith("StakingPaused");
+
+      // Verify rewarder was not called due to pause
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
     });
 
     it("Should revert if amount is zero", async function () {
@@ -538,6 +589,14 @@ describe("BETRStaking", function () {
     it("Should allow user to stake for themselves", async function () {
       const { betrStaking, mockToken, staker1, owner } = await loadFixture(deployBETRStakingFixture);
 
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
+
       // Fund staker with tokens
       await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
         account: owner.account
@@ -550,6 +609,10 @@ describe("BETRStaking", function () {
 
       const stakeAmount = parseEther("100");
 
+      // Verify initial state
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(0n);
+
       expect(await betrStaking.write.stakeFor([staker1.account.address, stakeAmount], {
         account: staker1.account
       })).to.emit(betrStaking, "Staked").withArgs(staker1.account.address, stakeAmount);
@@ -557,10 +620,29 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(stakeAmount);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stakeAmount);
+
+      // Verify rewarder was called
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
+      
+      // Verify the call details
+      const [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stakeAmount);
+      expect(callIndex).to.equal(1n);
     });
 
     it("Should handle mixed stake and stakeFor operations", async function () {
       const { betrStaking, mockToken, staker1, staker2, otherAccount, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
 
       // Fund both users
       await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
@@ -581,10 +663,17 @@ describe("BETRStaking", function () {
       const stake1 = parseEther("100");
       const stake2 = parseEther("200");
 
+      // Verify initial state
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
+
       // Staker1 stakes for themselves
       await betrStaking.write.stake([stake1], {
         account: staker1.account
       });
+
+      // Verify first rewarder call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
 
       // OtherAccount stakes for staker2
       await betrStaking.write.stakeFor([staker2.account.address, stake2], {
@@ -594,18 +683,35 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stake1);
       expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(stake2);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1 + stake2);
+
+      // Verify second rewarder call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(2n);
+      expect(await mockRewarder.read.getUserCalls([staker2.account.address])).to.equal(1n);
+
+      // Verify call details for both users
+      let [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stake1);
+      expect(callIndex).to.equal(1n);
       
-      // Check stakers array
-      let stakers = await betrStaking.read.stakers();
-      stakers = stakers.map(staker => staker.toLocaleLowerCase()) as `0x${string}`[];
-      expect(stakers).to.have.lengthOf(2);
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-      expect(stakers).to.include(staker1.account.address.toLocaleLowerCase());
-      expect(stakers).to.include(staker2.account.address.toLocaleLowerCase());
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker2.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker2.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stake2);
+      expect(callIndex).to.equal(2n);
     });
 
     it("Should emit correct Staked event with beneficiary address", async function () {
       const { betrStaking, mockToken, staker1, otherAccount, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder to staking contract
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
 
       // Fund the caller with tokens
       await mockToken.write.mint([otherAccount.account.address, parseEther("1000")], {
@@ -622,6 +728,10 @@ describe("BETRStaking", function () {
       expect(await betrStaking.write.stakeFor([staker1.account.address, stakeAmount], {
         account: otherAccount.account
       })).to.emit(betrStaking, "Staked").withArgs(staker1.account.address, stakeAmount);
+
+      // Verify rewarder was called
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
     });
   });
 
@@ -650,11 +760,6 @@ describe("BETRStaking", function () {
       // Check total staked after stake
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stakeAmount);
 
-      // Check stakers array after stake
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-
       // Then unstake
       expect(await betrStaking.write.unstake([unstakeAmount], {
         account: staker1.account
@@ -663,11 +768,6 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount - unstakeAmount);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(stakeAmount - unstakeAmount);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stakeAmount - unstakeAmount);
-      
-      // Check stakers array after partial unstake (should still be 1)
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
     });
 
     it("Should unstake all tokens", async function () {
@@ -693,11 +793,6 @@ describe("BETRStaking", function () {
       // Check total staked after stake
       expect(await betrStaking.read.totalStakedAmount()).to.equal(stakeAmount);
 
-      // Check stakers array after stake
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-
       // Unstake all
       await betrStaking.write.unstake([stakeAmount], {
         account: staker1.account
@@ -706,11 +801,6 @@ describe("BETRStaking", function () {
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(0n);
       expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(0n);
       expect(await betrStaking.read.totalStakedAmount()).to.equal(0n);
-      
-      // Check stakers array after full unstake (should be empty)
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(0);
-      expect(await betrStaking.read.stakersCount()).to.equal(0n);
     });
 
     it("Should revert if unstaking is paused", async function () {
@@ -786,131 +876,7 @@ describe("BETRStaking", function () {
     });
   });
 
-  describe("Multiple Stakers", function () {
-    it("Should handle multiple stakers correctly", async function () {
-      const { betrStaking, mockToken, staker1, staker2, owner } = await loadFixture(deployBETRStakingFixture);
 
-      // Fund both stakers
-      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-      await mockToken.write.mint([staker2.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-
-      // Approve tokens
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker1.account
-      });
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker2.account
-      });
-
-      const stake1 = parseEther("100");
-      const stake2 = parseEther("200");
-
-      // Staker1 stakes
-      await betrStaking.write.stake([stake1], {
-        account: staker1.account
-      });
-
-      // Check total staked after first staker
-      expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1);
-
-      // Check stakers array after first staker
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-
-      // Staker2 stakes
-      await betrStaking.write.stake([stake2], {
-        account: staker2.account
-      });
-
-      expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stake1);
-      expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(stake2);
-      expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(stake1 + stake2);
-      expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1 + stake2);
-      expect(await mockToken.read.balanceOf([staker1.account.address])).to.equal(parseEther("1000") - stake1);
-      expect(await mockToken.read.balanceOf([staker2.account.address])).to.equal(parseEther("1000") - stake2);
-      
-      // Check stakers array after second staker
-      stakers = await betrStaking.read.stakers();
-      stakers = stakers.map(staker => staker.toLocaleLowerCase()) as `0x${string}`[];
-      expect(stakers).to.have.lengthOf(2);
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-      expect(stakers).to.include(staker1.account.address.toLocaleLowerCase());
-      expect(stakers).to.include(staker2.account.address.toLocaleLowerCase());
-    });
-
-    it("Should allow stakers to unstake independently", async function () {
-      const { betrStaking, mockToken, staker1, staker2, owner } = await loadFixture(deployBETRStakingFixture);
-
-      // Fund both stakers
-      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-      await mockToken.write.mint([staker2.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-
-      // Approve tokens
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker1.account
-      });
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker2.account
-      });
-
-      const stake1 = parseEther("100");
-      const stake2 = parseEther("200");
-
-      // Both stake
-      await betrStaking.write.stake([stake1], {
-        account: staker1.account
-      });
-      await betrStaking.write.stake([stake2], {
-        account: staker2.account
-      });
-
-      // Check total staked after both stake
-      expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1 + stake2);
-
-      // Check stakers array after both stake
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(2);
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-
-      // Staker1 unstakes half
-      await betrStaking.write.unstake([parseEther("50")], {
-        account: staker1.account
-      });
-
-      // Check total staked after partial unstake
-      expect(await betrStaking.read.totalStakedAmount()).to.equal(stake1 + stake2 - parseEther("50"));
-
-      // Check stakers array after partial unstake (should still be 2)
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(2);
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-
-      // Staker2 unstakes all
-      await betrStaking.write.unstake([stake2], {
-        account: staker2.account
-      });
-
-      expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(parseEther("50"));
-      expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(0n);
-      expect(await mockToken.read.balanceOf([betrStaking.address])).to.equal(parseEther("50"));
-      expect(await betrStaking.read.totalStakedAmount()).to.equal(parseEther("50"));
-      
-      // Check stakers array after full unstake of staker2 (should be 1)
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-      expect(stakers[0].toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
-    });
-  });
 
   describe("Total Staked Amount", function () {
     it("Should start with zero total staked amount", async function () {
@@ -1010,94 +976,7 @@ describe("BETRStaking", function () {
     });
   });
 
-  describe("Stakers Management", function () {
-    it("Should return correct stakers array", async function () {
-      const { betrStaking, mockToken, staker1, staker2, owner } = await loadFixture(deployBETRStakingFixture);
 
-      // Initially should be empty
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(0);
-      expect(await betrStaking.read.stakersCount()).to.equal(0n);
-
-      // Fund and stake first user
-      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker1.account
-      });
-      await betrStaking.write.stake([parseEther("100")], {
-        account: staker1.account
-      });
-
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(stakers[0].toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-
-      // Fund and stake second user
-      await mockToken.write.mint([staker2.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker2.account
-      });
-      await betrStaking.write.stake([parseEther("200")], {
-        account: staker2.account
-      });
-
-      stakers = await betrStaking.read.stakers();
-      stakers = stakers.map(staker => staker.toLocaleLowerCase()) as `0x${string}`[];
-      expect(stakers).to.have.lengthOf(2);
-      expect(stakers).to.include(staker1.account.address.toLocaleLowerCase());
-      expect(stakers).to.include(staker2.account.address.toLocaleLowerCase());
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-    });
-
-    it("Should handle staker removal correctly", async function () {
-      const { betrStaking, mockToken, staker1, staker2, owner } = await loadFixture(deployBETRStakingFixture);
-
-      // Fund both stakers
-      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-      await mockToken.write.mint([staker2.account.address, parseEther("1000")], {
-        account: owner.account
-      });
-
-      // Approve tokens
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker1.account
-      });
-      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
-        account: staker2.account
-      });
-
-      // Both stake
-      await betrStaking.write.stake([parseEther("100")], {
-        account: staker1.account
-      });
-      await betrStaking.write.stake([parseEther("200")], {
-        account: staker2.account
-      });
-
-      // Verify both are in stakers array
-      let stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(2);
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
-
-      // Remove staker1 completely
-      await betrStaking.write.unstake([parseEther("100")], {
-        account: staker1.account
-      });
-
-      // Verify staker1 is removed from array
-      stakers = await betrStaking.read.stakers();
-      expect(stakers).to.have.lengthOf(1);
-      expect(await betrStaking.read.stakersCount()).to.equal(1n);
-      expect(stakers[0].toLocaleLowerCase()).to.equal(staker2.account.address.toLocaleLowerCase());
-    });
-  });
 
   describe("Batch Unstake", function () {
     it("Should batch unstake multiple users", async function () {
@@ -1130,7 +1009,6 @@ describe("BETRStaking", function () {
       // Verify both are staking
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(parseEther("100"));
       expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(parseEther("200"));
-      expect(await betrStaking.read.stakersCount()).to.equal(2n);
 
       // Batch unstake both users
       const users = [staker1.account.address, staker2.account.address];
@@ -1143,7 +1021,6 @@ describe("BETRStaking", function () {
       // Verify unstaking worked
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(parseEther("50"));
       expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(parseEther("100"));
-      expect(await betrStaking.read.stakersCount()).to.equal(2n); // Both still have stakes
     });
 
     it("Should batch unstake all tokens for users", async function () {
@@ -1184,8 +1061,6 @@ describe("BETRStaking", function () {
       // Verify both users are completely unstaked
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(0n);
       expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(0n);
-      expect(await betrStaking.read.stakersCount()).to.equal(0n);
-      expect(await betrStaking.read.stakers()).to.have.lengthOf(0);
     });
 
     it("Should batch unstake even when staking is paused", async function () {
@@ -1302,7 +1177,6 @@ describe("BETRStaking", function () {
       // Verify staker1 is unstaked, staker2 unchanged
       expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(0n);
       expect(await betrStaking.read.stakedAmount([staker2.account.address])).to.equal(0n);
-      expect(await betrStaking.read.stakersCount()).to.equal(0n);
     });
 
     it("Should emit Unstaked events for each user", async function () {
@@ -1421,7 +1295,675 @@ describe("BETRStaking", function () {
     });
   });
 
+  describe("Rewarder Management", function () {
+    it("Should add a rewarder successfully", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
 
+      // Initially should not be a rewarder
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.false;
+
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was added
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+    });
+
+    it("Should add multiple rewarders", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add first rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Add second rewarder
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarders were added
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.true;
+    });
+
+    it("Should revert when adding zero address as rewarder", async function () {
+      const { betrStaking, owner } = await loadFixture(deployBETRStakingFixture);
+
+      await expect(betrStaking.write.addRewarder(["0x0000000000000000000000000000000000000000"], {
+        account: owner.account
+      })).to.be.rejectedWith("InvalidInput");
+    });
+
+    it("Should revert when non-owner tries to add rewarder", async function () {
+      const { betrStaking, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      await expect(betrStaking.write.addRewarder([user.account.address], {
+        account: otherAccount.account
+      })).to.be.rejectedWith("NotOwner");
+    });
+
+    it("Should revert when adding duplicate rewarder", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // Add rewarder first
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was added
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+
+      // Try to add the same rewarder again
+      await expect(betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.be.rejectedWith("InvalidInput");
+    });
+
+    it("Should revert when adding multiple duplicate rewarders", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add first rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Add second rewarder
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Try to add first rewarder again
+      await expect(betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.be.rejectedWith("InvalidInput");
+
+      // Try to add second rewarder again
+      await expect(betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      })).to.be.rejectedWith("InvalidInput");
+    });
+
+    it("Should allow adding rewarder after removing it", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // Add rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was added
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+
+      // Remove rewarder
+      await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was removed
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.false;
+
+      // Should be able to add the same rewarder again
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was added again
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+    });
+
+    it("Should remove a rewarder successfully", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // Add rewarder first
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Remove rewarder
+      await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was removed
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.false;
+    });
+
+    it("Should remove rewarder from middle of array", async function () {
+      const { betrStaking, owner, otherAccount, user, staker1 } = await loadFixture(deployBETRStakingFixture);
+
+      // Add three rewarders
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([staker1.account.address], {
+        account: owner.account
+      });
+
+      // Remove middle rewarder (user)
+      await betrStaking.write.removeRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was removed
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.false;
+
+      // Verify other rewarders are still there
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([staker1.account.address])).to.be.true;
+    });
+
+    it("Should handle removing non-existent rewarder gracefully", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add one rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Try to remove non-existent rewarder
+      await betrStaking.write.removeRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarder was not removed
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.false;
+
+      // Verify other rewarders are still there
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+    });
+
+    it("Should revert when non-owner tries to remove rewarder", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add rewarder first
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Try to remove with non-owner
+      await expect(betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: user.account
+      })).to.be.rejectedWith("NotOwner");
+    });
+
+    it("Should handle complex add/remove operations", async function () {
+      const { betrStaking, owner, otherAccount, user, staker1, staker2 } = await loadFixture(deployBETRStakingFixture);
+
+      // Add multiple rewarders
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([staker1.account.address], {
+        account: owner.account
+      });
+
+      // Remove first rewarder
+      await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Add new rewarder
+      await betrStaking.write.addRewarder([staker2.account.address], {
+        account: owner.account
+      });
+
+      // Remove middle rewarder
+      await betrStaking.write.removeRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify rewarders inclusion and exclusion
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.false;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.false;
+      expect(await betrStaking.read.isRewarder([staker1.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([staker2.account.address])).to.be.true;
+    });
+
+    it("Should call rewarders when staking", async function () {
+      const { betrStaking, mockToken, staker1, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
+
+      // Fund staker with tokens
+      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
+        account: owner.account
+      });
+
+      // Approve tokens
+      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
+        account: staker1.account
+      });
+
+      const stakeAmount = parseEther("100");
+
+      // Verify initial state
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(0n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(0n);
+
+      // Stake - this should call the rewarder
+      await betrStaking.write.stake([stakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify staking worked
+      expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount);
+      
+      // Verify rewarder was called
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
+      
+      // Verify the call details
+      const [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stakeAmount);
+      expect(callIndex).to.equal(1n);
+    });
+
+    it("Should call rewarders when unstaking", async function () {
+      const { betrStaking, mockToken, staker1, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create a mock rewarder contract
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
+
+      // Fund staker with tokens
+      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
+        account: owner.account
+      });
+
+      // Approve tokens
+      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
+        account: staker1.account
+      });
+
+      const stakeAmount = parseEther("100");
+      const unstakeAmount = parseEther("50");
+
+      // First stake
+      await betrStaking.write.stake([stakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify first call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
+      
+      let [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stakeAmount);
+      expect(callIndex).to.equal(1n);
+
+      // Then unstake - this should call the rewarder again
+      await betrStaking.write.unstake([unstakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify unstaking worked
+      expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount - unstakeAmount);
+      
+      // Verify second call
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(2n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(2n);
+      
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(stakeAmount);
+      expect(newAmount).to.equal(stakeAmount - unstakeAmount);
+      expect(callIndex).to.equal(2n);
+    });
+
+    it("Should call multiple rewarders when staking", async function () {
+      const { betrStaking, mockToken, staker1, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create multiple mock rewarder contracts
+      const mockRewarder1 = await hre.viem.deployContract("MockRewarder");
+      const mockRewarder2 = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarders
+      await betrStaking.write.addRewarder([mockRewarder1.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([mockRewarder2.address], {
+        account: owner.account
+      });
+
+      // Fund staker with tokens
+      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
+        account: owner.account
+      });
+
+      // Approve tokens
+      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
+        account: staker1.account
+      });
+
+      const stakeAmount = parseEther("100");
+
+      // Verify initial state
+      expect(await mockRewarder1.read.getTotalCalls()).to.equal(0n);
+      expect(await mockRewarder2.read.getTotalCalls()).to.equal(0n);
+
+      // Stake - this should call both rewarders
+      await betrStaking.write.stake([stakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify staking worked
+      expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount);
+      
+      // Verify both rewarders were called
+      expect(await mockRewarder1.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder2.read.getTotalCalls()).to.equal(1n);
+      
+      // Verify call details for both rewarders
+      let [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder1.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stakeAmount);
+      expect(callIndex).to.equal(1n);
+      
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder2.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stakeAmount);
+      expect(callIndex).to.equal(1n);
+    });
+
+    it("Should handle rewarder removal during operations", async function () {
+      const { betrStaking, mockToken, staker1, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create mock rewarder contracts
+      const mockRewarder1 = await hre.viem.deployContract("MockRewarder");
+      const mockRewarder2 = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarders
+      await betrStaking.write.addRewarder([mockRewarder1.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([mockRewarder2.address], {
+        account: owner.account
+      });
+
+      // Fund staker with tokens
+      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
+        account: owner.account
+      });
+
+      // Approve tokens
+      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
+        account: staker1.account
+      });
+
+      const stakeAmount = parseEther("100");
+
+      // First stake - should call both rewarders
+      await betrStaking.write.stake([stakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify both rewarders were called
+      expect(await mockRewarder1.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder2.read.getTotalCalls()).to.equal(1n);
+
+      // Remove one rewarder
+      await betrStaking.write.removeRewarder([mockRewarder1.address], {
+        account: owner.account
+      });
+
+      // Stake again - should only call remaining rewarder
+      await betrStaking.write.stake([stakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify final state
+      expect(await betrStaking.read.stakedAmount([staker1.account.address])).to.equal(stakeAmount * 2n);
+      
+      // Verify only the remaining rewarder was called for the second stake
+      expect(await mockRewarder1.read.getTotalCalls()).to.equal(1n); // No additional calls
+      expect(await mockRewarder2.read.getTotalCalls()).to.equal(2n); // Called twice
+      
+      // Verify the second call details for the remaining rewarder
+      const [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder2.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(stakeAmount);
+      expect(newAmount).to.equal(stakeAmount * 2n);
+      expect(callIndex).to.equal(2n);
+    });
+
+    // Tests for isRewarder function (uncomment when function is properly exposed)
+    it("Should correctly identify rewarders with isRewarder function", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Initially no rewarders should exist
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.false;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.false;
+
+      // Add first rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify first rewarder is identified
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.false;
+
+      // Add second rewarder
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify both rewarders are identified
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.true;
+    });
+
+    it("Should correctly handle isRewarder after removal", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add two rewarders
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify both are rewarders
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.true;
+
+      // Remove first rewarder
+      await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify first is no longer a rewarder, second still is
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.false;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.true;
+    });
+
+    it("Should handle isRewarder with zero address", async function () {
+      const { betrStaking } = await loadFixture(deployBETRStakingFixture);
+
+      // Zero address should not be a rewarder
+      expect(await betrStaking.read.isRewarder(["0x0000000000000000000000000000000000000000"])).to.be.false;
+    });
+
+    it("Should handle isRewarder with non-existent address", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // Add a rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Create a new address that hasn't been added as rewarder
+      const [newAccount] = await hre.viem.getWalletClients();
+      
+      // Verify new address is not a rewarder
+      expect(await betrStaking.read.isRewarder([newAccount.account.address])).to.be.false;
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+    });
+
+    it("Should handle isRewarder with multiple add/remove cycles", async function () {
+      const { betrStaking, owner, otherAccount, user, staker1 } = await loadFixture(deployBETRStakingFixture);
+
+      // Add multiple rewarders
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([staker1.account.address], {
+        account: owner.account
+      });
+
+      // Verify all are rewarders
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([staker1.account.address])).to.be.true;
+
+      // Remove middle rewarder
+      await betrStaking.write.removeRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Verify middle is no longer a rewarder, others still are
+      expect(await betrStaking.read.isRewarder([otherAccount.account.address])).to.be.true;
+      expect(await betrStaking.read.isRewarder([user.account.address])).to.be.false;
+      expect(await betrStaking.read.isRewarder([staker1.account.address])).to.be.true;
+
+      // Add new rewarder
+      const [newAccount] = await hre.viem.getWalletClients();
+      await betrStaking.write.addRewarder([newAccount.account.address], {
+        account: owner.account
+      });
+
+      // Verify new rewarder is identified
+      expect(await betrStaking.read.isRewarder([newAccount.account.address])).to.be.true;
+    });
+
+    it("Should comprehensively handle onStakeChanged calls", async function () {
+      const { betrStaking, mockToken, staker1, staker2, owner } = await loadFixture(deployBETRStakingFixture);
+
+      // Create mock rewarder
+      const mockRewarder = await hre.viem.deployContract("MockRewarder");
+      
+      // Add rewarder
+      await betrStaking.write.addRewarder([mockRewarder.address], {
+        account: owner.account
+      });
+
+      // Fund both stakers with tokens
+      await mockToken.write.mint([staker1.account.address, parseEther("1000")], {
+        account: owner.account
+      });
+      await mockToken.write.mint([staker2.account.address, parseEther("1000")], {
+        account: owner.account
+      });
+
+      // Approve tokens
+      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
+        account: staker1.account
+      });
+      await mockToken.write.approve([betrStaking.address, parseEther("1000")], {
+        account: staker2.account
+      });
+
+      // Test 1: Initial stake for staker1
+      const stake1 = parseEther("100");
+      await betrStaking.write.stake([stake1], {
+        account: staker1.account
+      });
+
+      // Verify call details
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(1n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(1n);
+      
+      let [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stake1);
+      expect(callIndex).to.equal(1n);
+
+      // Test 2: Stake for staker2
+      const stake2 = parseEther("200");
+      await betrStaking.write.stake([stake2], {
+        account: staker2.account
+      });
+
+      // Verify call details
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(2n);
+      expect(await mockRewarder.read.getUserCalls([staker2.account.address])).to.equal(1n);
+      
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker2.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker2.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(0n);
+      expect(newAmount).to.equal(stake2);
+      expect(callIndex).to.equal(2n);
+
+      // Test 3: Additional stake for staker1
+      const additionalStake = parseEther("50");
+      await betrStaking.write.stake([additionalStake], {
+        account: staker1.account
+      });
+
+      // Verify call details
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(3n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(2n);
+      
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(stake1);
+      expect(newAmount).to.equal(stake1 + additionalStake);
+      expect(callIndex).to.equal(3n);
+
+      // Test 4: Unstake for staker1
+      const unstakeAmount = parseEther("30");
+      await betrStaking.write.unstake([unstakeAmount], {
+        account: staker1.account
+      });
+
+      // Verify call details
+      expect(await mockRewarder.read.getTotalCalls()).to.equal(4n);
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(3n);
+      
+      [user, oldAmount, newAmount, timestamp, callIndex] = await mockRewarder.read.getLastStakeChange([staker1.account.address]);
+      expect(user.toLocaleLowerCase()).to.equal(staker1.account.address.toLocaleLowerCase());
+      expect(oldAmount).to.equal(stake1 + additionalStake);
+      expect(newAmount).to.equal(stake1 + additionalStake - unstakeAmount);
+      expect(callIndex).to.equal(4n);
+
+      // Test 5: Verify user history
+      expect(await mockRewarder.read.getUserStakeChangesCount([staker1.account.address])).to.equal(3n);
+      expect(await mockRewarder.read.getUserStakeChangesCount([staker2.account.address])).to.equal(1n);
+
+      // Test 6: Verify total calls per user
+      expect(await mockRewarder.read.getUserCalls([staker1.account.address])).to.equal(3n);
+      expect(await mockRewarder.read.getUserCalls([staker2.account.address])).to.equal(1n);
+    });
+  });
 
   describe("Events", function () {
     it("Should emit correct events for staking", async function () {
@@ -1494,6 +2036,91 @@ describe("BETRStaking", function () {
       expect(await betrStaking.write.setStakingPaused([false], {
         account: owner.account
       })).to.emit(betrStaking, "StakingPausedSet").withArgs(false);
+    });
+
+    it("Should emit RewarderAdded event when adding a rewarder", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      expect(await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderAdded").withArgs(otherAccount.account.address);
+    });
+
+    it("Should emit RewarderRemoved event when removing a rewarder", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // First add a rewarder
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+
+      // Then remove it and verify event emission
+      expect(await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderRemoved").withArgs(otherAccount.account.address);
+    });
+
+    it("Should emit RewarderRemoved event even when removing non-existent rewarder", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // Try to remove a rewarder that was never added
+      expect(await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderRemoved").withArgs(otherAccount.account.address);
+    });
+
+    it("Should emit multiple RewarderAdded events when adding multiple rewarders", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add first rewarder
+      expect(await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderAdded").withArgs(otherAccount.account.address);
+
+      // Add second rewarder
+      expect(await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderAdded").withArgs(user.account.address);
+    });
+
+    it("Should emit RewarderRemoved events in correct order when removing multiple rewarders", async function () {
+      const { betrStaking, owner, otherAccount, user } = await loadFixture(deployBETRStakingFixture);
+
+      // Add two rewarders
+      await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      await betrStaking.write.addRewarder([user.account.address], {
+        account: owner.account
+      });
+
+      // Remove first rewarder
+      expect(await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderRemoved").withArgs(otherAccount.account.address);
+
+      // Remove second rewarder
+      expect(await betrStaking.write.removeRewarder([user.account.address], {
+        account: owner.account
+      })).to.emit(betrStaking, "RewarderRemoved").withArgs(user.account.address);
+    });
+
+    it("Should emit events with correct indexed parameters", async function () {
+      const { betrStaking, owner, otherAccount } = await loadFixture(deployBETRStakingFixture);
+
+      // Test RewarderAdded event with indexed parameter
+      const addTx = await betrStaking.write.addRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      
+      expect(addTx).to.emit(betrStaking, "RewarderAdded").withArgs(otherAccount.account.address);
+
+      // Test RewarderRemoved event with indexed parameter
+      const removeTx = await betrStaking.write.removeRewarder([otherAccount.account.address], {
+        account: owner.account
+      });
+      
+      expect(removeTx).to.emit(betrStaking, "RewarderRemoved").withArgs(otherAccount.account.address);
     });
   });
 }); 

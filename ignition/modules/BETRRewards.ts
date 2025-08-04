@@ -7,8 +7,9 @@ import { vars } from "hardhat/config";
 const BETRRewardsModule = buildModule("BETRRewardsModule", (m) => {
   const owner = m.getParameter("owner", vars.get("BETR_OWNER"));
   const stakingContract = m.getParameter("stakingContract");
+  const rewardToken = m.getParameter("rewardToken");
 
-  const betrRewards = m.contract("BETRRewards", [owner, stakingContract]);
+  const betrRewards = m.contract("BETRRewards", [owner, stakingContract, rewardToken]);
 
   return { betrRewards };
 });

@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "./common/Ownable.sol";
-import {IBETRStaking} from "./interfaces/IBETRStaking.sol";
+import {IBETRStakingEventHandler} from "./interfaces/IBETRStakingEventHandler.sol";
+import {IBETRStakingStateProvider} from "./interfaces/IBETRStakingStateProvider.sol";
 import {InvalidInput} from "./common/error.sol";
 
 /*
@@ -11,49 +12,46 @@ import {InvalidInput} from "./common/error.sol";
  * @author Mirko Nosenzo (@netnose)
  * @notice This contract is used to manage rewards for the staking contract
  */
-contract BETRRewards is Ownable {
-    /*
-     * @title Reward
-     * @notice This struct is used to store the reward information
-     * @param token The address of the token
-     * @param amount The amount of the reward
-     */
-    struct Reward {
-        address token;
-        uint256 amount;
-    }
+contract BETRRewards is IBETRStakingEventHandler, Ownable {
+    mapping(address => uint256) private _debts;
+    mapping(address => uint256) private _credits;
 
-    mapping(address => Reward[]) private _rewards;
+    uint256 public constant PRECISION = 1e18;
 
-    IBETRStaking public stakingContract;
-    mapping(address => bool) public rewardableTokens;
-    mapping(address => uint256) public totalRewardsClaimable;
-    mapping(address => uint256) public totalRewardsClaimed;
+    IBETRStakingStateProvider public stakingContract;
+    IERC20 public rewardToken;
+    uint256 public rewardAccumulatedPerStakedToken;
+    uint256 public totalRewardsClaimed;
+    uint256 public totalRewardsClaimable;
     bool public isRewardingPaused;
 
     /*
      * @notice Constructor
      * @param _owner The owner of the contract
      * @param _stakingContract The address of the staking contract
+     * @param _rewardToken The address of the reward token
      */
-    constructor(address _owner, address _stakingContract) Ownable(_owner) {
+    constructor(address _owner, address _stakingContract, address _rewardToken) Ownable(_owner) {
         if (_stakingContract == address(0)) revert InvalidInput();
+        if (_rewardToken == address(0)) revert InvalidInput();
 
-        // Validate staking contract
-        try IBETRStaking(_stakingContract).totalStakedAmount() returns (uint256) {
-            // Contract responds to totalStakedAmount() - likely a valid staking contract
+        // Validate staking state provider
+        try IBETRStakingStateProvider(_stakingContract).totalStakedAmount() returns (uint256) {
+            // Contract responds to totalStakedAmount() - likely a valid staking state provider
         } catch {
             revert InvalidInput();
         }
 
-        stakingContract = IBETRStaking(_stakingContract);
-    }
+        // Validate reward token
+        try IERC20(_rewardToken).totalSupply() returns (uint256) {
+            // Contract responds to totalSupply() - likely a valid reward token
+        } catch {
+            revert InvalidInput();
+        }
 
-    /*
-     * @title TokenNotRewardable
-     * @notice Error to check if the token is not rewardable
-     */
-    error TokenNotRewardable();
+        stakingContract = IBETRStakingStateProvider(_stakingContract);
+        rewardToken = IERC20(_rewardToken);
+    }
 
     /*
      * @title RewardingPaused
@@ -65,15 +63,26 @@ contract BETRRewards is Ownable {
      * @title NoClaimableReward
      * @notice Error to check if there is no claimable reward
      * @param _staker The address of the staker
-     * @param _token The address of the token
      */
-    error NoClaimableReward(address _staker, address _token);
+    error NoClaimableReward(address _staker);
 
     /*
      * @title NoStakedAmount
      * @notice Error to check if there is no staked amount
      */
     error NoStakedAmount();
+
+    /*
+     * @title NotStakingContract
+     * @notice Error to check if the caller is not the staking contract
+     */
+    error NotStakingContract();
+
+    /*
+     * @title StakingContractNotRewarder
+     * @notice Error to check if the caller is not a rewarder
+     */
+    error StakingContractNotRewarder();
 
     /*
      * @title RewardingPausedSet
@@ -83,252 +92,96 @@ contract BETRRewards is Ownable {
     event RewardingPausedSet(bool indexed _isRewardingPaused);
 
     /*
-     * @title RewardableTokenSet
-     * @notice Event to notify when a token is set as rewardable
-     * @param _token The address of the token
-     * @param _rewardable Whether the token is rewardable
-     */
-    event RewardableTokenSet(address indexed _token, bool _rewardable);
-
-    /*
      * @title RewardAdded
      * @notice Event to notify when a reward is added
-     * @param _token The address of the token
      * @param _amount The amount of the reward
      */
-    event RewardAdded(address indexed _token, uint256 _amount);
+    event RewardAdded(uint256 _amount);
 
     /*
      * @title RewardClaimed
      * @notice Event to notify when a reward is claimed
      * @param _staker The address of the staker
-     * @param _token The address of the token
      * @param _amount The amount of the reward
      */
-    event RewardClaimed(address indexed _staker, address indexed _token, uint256 _amount);
+    event RewardClaimed(address indexed _staker, uint256 _amount);
 
     /*
-     * @title _getReward
-     * @notice Function to get the reward for a staker and token
-     * @param _staker The address of the staker
-     * @param _token The address of the token
-     * @return reward The reward for the staker and token
+     * @title onlyStakingContract
+     * @notice Modifier to check if the caller is the staking contract
      */
-    function _getReward(address _staker, address _token) internal returns (Reward storage) {
-        Reward[] storage rewards = _rewards[_staker];
-        uint256 rewardsLength = rewards.length;
-        for (uint256 i = 0; i < rewardsLength; i++) {
-            if (rewards[i].token == _token) return rewards[i];
-        }
-        rewards.push(Reward(_token, 0));
-        return rewards[rewardsLength];
-    }
-
-    /*
-     * @title _removeReward
-     * @notice Function to remove a reward
-     * @param _staker The address of the staker
-     * @param _token The address of the token
-     */
-    function _removeReward(address _staker, address _token) internal {
-        Reward[] storage rewards = _rewards[_staker];
-        uint256 rewardsLength = rewards.length;
-        for (uint256 i = 0; i < rewardsLength; i++) {
-            if (rewards[i].token == _token) {
-                rewards[i] = rewards[rewardsLength - 1];
-                rewards.pop();
-                return;
-            }
-        }
+    modifier onlyStakingContract() {
+        if (msg.sender != address(stakingContract)) revert NotStakingContract();
+        _;
     }
 
     /*
      * @title _claim
      * @notice Function to claim a reward
      * @param _user The address of the user
-     * @param _token The address of the token
      */
-    function _claim(address _user, address _token) internal {
+    function _claim(address _user, uint256 _stakedAmount) internal {
         if (_user == address(0)) revert InvalidInput();
-        if (_token == address(0)) revert InvalidInput();
-        if (!rewardableTokens[_token]) revert TokenNotRewardable();
 
-        Reward storage reward = _getReward(_user, _token);
-        uint256 rewardAmount = reward.amount;
-        if (rewardAmount == 0) revert NoClaimableReward(_user, _token);
+        uint256 rewardAmount = rewardAccumulatedPerStakedToken * _stakedAmount / PRECISION;
+        uint256 actualRewardAmount = rewardAmount - _debts[_user] + _credits[_user];
+        if (actualRewardAmount == 0) revert NoClaimableReward(_user);
 
-        _removeReward(_user, _token);
-        totalRewardsClaimed[_token] += rewardAmount;
-        totalRewardsClaimable[_token] -= rewardAmount;
-        IERC20(_token).transfer(_user, rewardAmount);
-        emit RewardClaimed(_user, _token, rewardAmount);
+        _debts[_user] = rewardAmount;
+        _credits[_user] = 0;
+        totalRewardsClaimed += actualRewardAmount;
+        totalRewardsClaimable -= actualRewardAmount;
+        rewardToken.transfer(_user, actualRewardAmount);
+        emit RewardClaimed(_user, actualRewardAmount);
     }
 
     /*
-     * @title _claimAndStake
-     * @notice Function to claim a reward and stake it
-     * @param _user The address of the user
-     * @param _token The address of the token
+     * @title claimable
+     * @notice Function to get the claimable rewards for a staker
+     * @param _staker The address of the staker
+     * @return _amount The amount of the claimable rewards
      */
-    function _claimAndStake(address _user, address _token) internal {
-        if (_user == address(0)) revert InvalidInput();
-        if (_token == address(0)) revert InvalidInput();
-        if (!rewardableTokens[_token]) revert TokenNotRewardable();
-        if (address(stakingContract.stakingToken()) != _token) revert InvalidInput();
-        
-        Reward storage reward = _getReward(_user, _token);
-        uint256 rewardAmount = reward.amount;
-        if (rewardAmount == 0) revert NoClaimableReward(_user, _token);
-
-        _removeReward(_user, _token);
-        totalRewardsClaimed[_token] += rewardAmount;
-        totalRewardsClaimable[_token] -= rewardAmount;
-        IERC20(_token).approve(address(stakingContract), rewardAmount);
-        emit RewardClaimed(_user, _token, rewardAmount);
-        stakingContract.stakeFor(_user, rewardAmount);
-    }
-
-    /*
-     * @title _claimAll
-     * @notice Function to claim all rewards for a user
-     * @param _user The address of the user
-     */
-    function _claimAll(address _user) internal {
-        if (_user == address(0)) revert InvalidInput();
-
-        Reward[] storage rewards = _rewards[_user];
-        if (rewards.length == 0) return;
-
-        for (uint256 i = 0; i < rewards.length; i++) {
-            address token = rewards[i].token;
-            uint256 rewardAmount = rewards[i].amount;
-
-            if (rewardAmount > 0) {
-                rewards[i].amount = 0;
-                totalRewardsClaimed[token] += rewardAmount;
-                totalRewardsClaimable[token] -= rewardAmount;
-                IERC20(token).transfer(_user, rewardAmount);
-                emit RewardClaimed(_user, token, rewardAmount);
-            }
-        }
-        delete _rewards[_user];
+    function claimable(address _staker) public view returns (uint256 _amount) {
+        uint256 rewardAmount = rewardAccumulatedPerStakedToken * stakingContract.stakedAmount(_staker) / PRECISION;
+        uint256 actualRewardAmount = rewardAmount - _debts[_staker] + _credits[_staker];
+        return actualRewardAmount;
     }
 
     /*
      * @title claimable
      * @notice Function to get the claimable rewards for the caller
-     * @param _staker The address of the staker
-     * @return _tokens The tokens of the claimable rewards
-     * @return _amounts The amounts of the claimable rewards
+     * @return _amount The amount of the claimable rewards
      */
-    function claimable(address _staker) public view returns (address[] memory _tokens, uint256[] memory _amounts) {
-        Reward[] storage rewards = _rewards[_staker];
-        uint256 rewardsLength = rewards.length;
-        _tokens = new address[](rewardsLength);
-        _amounts = new uint256[](rewardsLength);
-        for (uint256 i = 0; i < rewardsLength; i++) {
-            _tokens[i] = rewards[i].token;
-            _amounts[i] = rewards[i].amount;
-        }
-    }
-
-    /*
-     * @notice Set the rewardable tokens
-     * @param _token The address of the token
-     * @param _rewardable Whether the token is rewardable
-     */
-    function setRewardableToken(address _token, bool _rewardable) public onlyOwner {
-        if (_token == address(0)) revert InvalidInput();
-        rewardableTokens[_token] = _rewardable;
-        emit RewardableTokenSet(_token, _rewardable);
+    function claimable() public view returns (uint256 _amount) {
+        return claimable(msg.sender);
     }
 
     /*
      * @title addReward
      * @notice Function to add a reward
-     * @param _token The address of the token
      * @param _amount The amount of the reward
-     * @param _users The addresses of the users to add the reward to
-     * @param _proportionalToTotalStakedAmount When true, the reward is proportional to the total staked amount, when false, the reward is proportional to the staked amount of the _users
      */
-    function addRewardTo(address _token, uint256 _amount, address[] memory _users, bool _proportionalToTotalStakedAmount) public {
+    function addReward(uint256 _amount) public {
         if (isRewardingPaused) revert RewardingPaused();
-        if (_token == address(0)) revert InvalidInput();
         if (_amount == 0) revert InvalidInput();
-        if (_users.length == 0) revert InvalidInput();
-        if (!rewardableTokens[_token]) revert TokenNotRewardable();
+        if (!stakingContract.isRewarder(address(this))) revert StakingContractNotRewarder();
 
-        uint256 usersLength = _users.length;
-        uint256 totalStakedAmount = 0;
-        if (_proportionalToTotalStakedAmount) {
-            totalStakedAmount = stakingContract.totalStakedAmount();
-        }
-        else {
-            totalStakedAmount = 0;
-            for (uint256 i = 0; i < usersLength; i++) {
-                address staker = _users[i];
-                if (staker == address(0)) revert InvalidInput();
-                uint256 stakedAmount = stakingContract.stakedAmount(staker);
-                totalStakedAmount += stakedAmount;
-            }
-        }
+        uint256 totalStakedAmount = stakingContract.totalStakedAmount();
         if (totalStakedAmount == 0) revert NoStakedAmount();
-        
-        uint256 totalRewardsAdded = 0;
-        for (uint256 i = 0; i < usersLength; i++) {
-            address staker = _users[i];
-            if (staker == address(0)) revert InvalidInput();
-            uint256 stakedAmount = stakingContract.stakedAmount(staker);
-            uint256 rewardAmount = (_amount * stakedAmount) / totalStakedAmount;
-            if (rewardAmount > 0) {
-                Reward storage reward = _getReward(staker, _token);
-                reward.amount += rewardAmount;
-                totalRewardsAdded += rewardAmount;
-            }
-        }
 
-        totalRewardsClaimable[_token] += totalRewardsAdded;
-        IERC20(_token).transferFrom(msg.sender, address(this), totalRewardsAdded);
-        emit RewardAdded(_token, totalRewardsAdded);
-    }
-
-    /*
-     * @title addReward
-     * @notice Function to add a reward
-     * @param _token The address of the token
-     * @param _amount The amount of the reward
-     */
-    function addReward(address _token, uint256 _amount) public {
-        addRewardTo(_token, _amount, stakingContract.stakers(), true);
+        rewardAccumulatedPerStakedToken += (_amount * PRECISION) / totalStakedAmount;
+        totalRewardsClaimable += _amount;
+        rewardToken.transferFrom(msg.sender, address(this), _amount);
+        emit RewardAdded(_amount);
     }
 
     /*
      * @title claim
      * @notice Function to claim a reward
-     * @param _token The address of the token
      */
-    function claim(address _token) public {
+    function claim() public {
         if (isRewardingPaused) revert RewardingPaused();
-        _claim(msg.sender, _token);
-    }
-
-    /*
-     * @title claimAndStake
-     * @notice Function to claim a reward and stake it
-     * @param _token The address of the token
-     */
-    function claimAndStake(address _token) public {
-        if (isRewardingPaused) revert RewardingPaused();
-        _claimAndStake(msg.sender, _token);
-    }
-
-    /*
-     * @title claimAll
-     * @notice Function to claim all rewards for the caller
-     */
-    function claimAll() public {
-        if (isRewardingPaused) revert RewardingPaused();
-        _claimAll(msg.sender);
+        _claim(msg.sender, stakingContract.stakedAmount(msg.sender));
     }
 
     /*
@@ -339,7 +192,7 @@ contract BETRRewards is Ownable {
      */
     function batchClaim(address[] memory _users) public onlyOwner {
         for (uint256 i = 0; i < _users.length; i++) {
-            _claimAll(_users[i]);
+            _claim(_users[i], stakingContract.stakedAmount(_users[i]));
         }
     }
 
@@ -351,5 +204,22 @@ contract BETRRewards is Ownable {
     function setRewardingPaused(bool _isRewardingPaused) public onlyOwner {
         isRewardingPaused = _isRewardingPaused;
         emit RewardingPausedSet(_isRewardingPaused);
+    }
+
+    /*
+     * @title onStakeChanged
+     * @notice Function to handle the stake changed event
+     * @param _user The address of the user
+     * @param _oldAmount The old amount of the stake
+     * @param _newAmount The new amount of the stake
+     */
+    function onStakeChanged(address _user, uint256 _oldAmount, uint256 _newAmount) public onlyStakingContract {
+        if (_user == address(0)) revert InvalidInput();
+        if (_oldAmount == _newAmount) return;
+
+        uint256 rewardAmount = rewardAccumulatedPerStakedToken * _oldAmount / PRECISION;
+        uint256 actualRewardAmount = rewardAmount - _debts[_user] + _credits[_user];
+        _credits[_user] = actualRewardAmount;
+        _debts[_user] = rewardAccumulatedPerStakedToken * _newAmount / PRECISION;
     }
 }
