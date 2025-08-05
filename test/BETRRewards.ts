@@ -79,36 +79,6 @@ describe("BETRRewards", function () {
       ).to.be.rejectedWith("InvalidInput");
     });
 
-    it("Should revert if staking contract is not a valid staking contract", async function () {
-      const { owner, mockRewardToken } = await loadFixture(deployBETRRewardsFixture);
-      
-      // Deploy a contract that's not a staking contract
-      const mockContract = await hre.viem.deployContract("Mock");
-      
-      await expect(
-        hre.viem.deployContract("BETRRewards", [
-          owner.account.address, 
-          mockContract.address,
-          mockRewardToken.address
-        ])
-      ).to.be.rejectedWith("InvalidInput");
-    });
-
-    it("Should revert if reward token is not a valid ERC20", async function () {
-      const { betrStaking, owner } = await loadFixture(deployBETRRewardsFixture);
-      
-      // Deploy a contract that's not an ERC20
-      const mockContract = await hre.viem.deployContract("Mock");
-      
-      await expect(
-        hre.viem.deployContract("BETRRewards", [
-          owner.account.address, 
-          betrStaking.address,
-          mockContract.address
-        ])
-      ).to.be.rejectedWith("InvalidInput");
-    });
-
     it("Should initialize with rewarding paused as false", async function () {
       const { betrRewards } = await loadFixture(deployBETRRewardsFixture);
 

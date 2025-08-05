@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {InvalidInput} from "./common/error.sol";
+import {InvalidInput, TokensTransferError} from "./common/error.sol";
 import {Ownable} from "./common/Ownable.sol";
 import {IBETRStakingEventHandler} from "./interfaces/IBETRStakingEventHandler.sol";
 import {IBETRStakingStateProvider} from "./interfaces/IBETRStakingStateProvider.sol";
@@ -27,13 +27,6 @@ contract BETRStaking is IBETRStakingStateProvider, Ownable {
      */
     constructor(address _owner, address _stakingToken) Ownable(_owner) {
         if (_stakingToken == address(0)) revert InvalidInput();
-        
-        // Validate ERC20 contract
-        try IERC20(_stakingToken).totalSupply() returns (uint256) {
-            // Contract responds to totalSupply() - likely a valid ERC20
-        } catch {
-            revert InvalidInput();
-        }
         
         stakingToken = IERC20(_stakingToken);
         isStakingPaused = false;
@@ -110,11 +103,15 @@ contract BETRStaking is IBETRStakingStateProvider, Ownable {
         
         uint256 oldStakedAmount = stakedAmount[_user];
         stakedAmount[_user] -= amountToUnstake;
-        stakingToken.transfer(_user, amountToUnstake);
-
         uint256 newStakedAmount = stakedAmount[_user];
         for (uint256 i = 0; i < rewarders.length; i++) {
             rewarders[i].onStakeChanged(_user, oldStakedAmount, newStakedAmount);
+        }
+
+        try stakingToken.transfer(_user, amountToUnstake) returns (bool success) {
+            if (!success) revert TokensTransferError();
+        } catch {
+            revert TokensTransferError();
         }
 
         emit Unstaked(_user, amountToUnstake);
@@ -134,11 +131,15 @@ contract BETRStaking is IBETRStakingStateProvider, Ownable {
         uint256 oldStakedAmount = stakedAmount[msg.sender];
         stakedAmount[msg.sender] += _amount;
         totalStakedAmount += _amount;
-        stakingToken.transferFrom(msg.sender, address(this), _amount);
-
         uint256 newStakedAmount = stakedAmount[msg.sender];
         for (uint256 i = 0; i < rewarders.length; i++) {
             rewarders[i].onStakeChanged(msg.sender, oldStakedAmount, newStakedAmount);
+        }
+
+        try stakingToken.transferFrom(msg.sender, address(this), _amount) returns (bool success) {
+            if (!success) revert TokensTransferError();
+        } catch {
+            revert TokensTransferError();
         }
 
         emit Staked(msg.sender, _amount);
@@ -158,11 +159,15 @@ contract BETRStaking is IBETRStakingStateProvider, Ownable {
         uint256 oldStakedAmount = stakedAmount[_user];
         stakedAmount[_user] += _amount;
         totalStakedAmount += _amount;
-        stakingToken.transferFrom(msg.sender, address(this), _amount);
-
         uint256 newStakedAmount = stakedAmount[_user];
         for (uint256 i = 0; i < rewarders.length; i++) {
             rewarders[i].onStakeChanged(_user, oldStakedAmount, newStakedAmount);
+        }
+
+        try stakingToken.transferFrom(msg.sender, address(this), _amount) returns (bool success) {
+            if (!success) revert TokensTransferError();
+        } catch {
+            revert TokensTransferError();
         }
 
         emit Staked(_user, _amount);

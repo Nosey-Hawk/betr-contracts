@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "./common/Ownable.sol";
 import {IBETRStakingEventHandler} from "./interfaces/IBETRStakingEventHandler.sol";
 import {IBETRStakingStateProvider} from "./interfaces/IBETRStakingStateProvider.sol";
-import {InvalidInput} from "./common/error.sol";
+import {InvalidInput, TokensTransferError} from "./common/error.sol";
 
 /*
  * @title BETRRewards
@@ -34,20 +34,6 @@ contract BETRRewards is IBETRStakingEventHandler, Ownable {
     constructor(address _owner, address _stakingContract, address _rewardToken) Ownable(_owner) {
         if (_stakingContract == address(0)) revert InvalidInput();
         if (_rewardToken == address(0)) revert InvalidInput();
-
-        // Validate staking state provider
-        try IBETRStakingStateProvider(_stakingContract).totalStakedAmount() returns (uint256) {
-            // Contract responds to totalStakedAmount() - likely a valid staking state provider
-        } catch {
-            revert InvalidInput();
-        }
-
-        // Validate reward token
-        try IERC20(_rewardToken).totalSupply() returns (uint256) {
-            // Contract responds to totalSupply() - likely a valid reward token
-        } catch {
-            revert InvalidInput();
-        }
 
         stakingContract = IBETRStakingStateProvider(_stakingContract);
         rewardToken = IERC20(_rewardToken);
@@ -131,7 +117,13 @@ contract BETRRewards is IBETRStakingEventHandler, Ownable {
         _credits[_user] = 0;
         totalRewardsClaimed += actualRewardAmount;
         totalRewardsClaimable -= actualRewardAmount;
-        rewardToken.transfer(_user, actualRewardAmount);
+
+        try rewardToken.transfer(_user, actualRewardAmount) returns (bool success) {
+            if (!success) revert TokensTransferError();
+        } catch {
+            revert TokensTransferError();
+        }
+        
         emit RewardClaimed(_user, actualRewardAmount);
     }
 
@@ -171,7 +163,13 @@ contract BETRRewards is IBETRStakingEventHandler, Ownable {
 
         rewardAccumulatedPerStakedToken += (_amount * PRECISION) / totalStakedAmount;
         totalRewardsClaimable += _amount;
-        rewardToken.transferFrom(msg.sender, address(this), _amount);
+
+        try rewardToken.transferFrom(msg.sender, address(this), _amount) returns (bool success) {
+            if (!success) revert TokensTransferError();
+        } catch {
+            revert TokensTransferError();
+        }
+
         emit RewardAdded(_amount);
     }
 

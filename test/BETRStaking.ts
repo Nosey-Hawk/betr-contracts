@@ -65,20 +65,6 @@ describe("BETRStaking", function () {
       ).to.be.rejectedWith("InvalidInput");
     });
 
-    it("Should revert if staking token is not a valid ERC20", async function () {
-      const { owner } = await loadFixture(deployBETRStakingFixture);
-      
-      // Deploy a contract that's not an ERC20
-      const mockContract = await hre.viem.deployContract("Mock");
-      
-      await expect(
-        hre.viem.deployContract("BETRStaking", [
-          owner.account.address, 
-          mockContract.address
-        ])
-      ).to.be.rejectedWith("InvalidInput");
-    });
-
     it("Should initialize with staking paused as false", async function () {
       const { betrStaking } = await loadFixture(deployBETRStakingFixture);
 
