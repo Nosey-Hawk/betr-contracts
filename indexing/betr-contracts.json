@@ -9,8 +9,8 @@
   "instances": [
     {
       "abi": "betrStaking",
-      "address": "0x43Fe3f90815DF795eb9672556eCCBb70a460ec0c",
-      "startBlock": 33592611,
+      "address": "0x808a12766632b456a74834F2FA8aE06DFC7482f1",
+      "startBlock": 33842447,
       "chain": "base",
       "enrich": {
         "handlers": {

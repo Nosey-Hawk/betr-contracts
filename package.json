@@ -11,7 +11,8 @@
     "deploy:helper": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base",
     "deploy:erc20payer": "hardhat ignition deploy ./ignition/modules/BETRERC20Payer.ts --network base",
     "deploy:staking": "hardhat ignition deploy ./ignition/modules/BETRStaking.ts --network base --parameters ignition/parameters.json",
-    "deploy:rewards": "hardhat ignition deploy ./ignition/modules/BETRRewards.ts --network base --parameters ignition/parameters.json"
+    "deploy:rewards": "hardhat ignition deploy ./ignition/modules/BETRRewards.ts --network base --parameters ignition/parameters.json",
+    "deploy:indexer": "goldsky subgraph deploy betr-contracts/1 --from-abi indexing/betr-contracts.json"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",
