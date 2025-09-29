@@ -4,6 +4,9 @@
   "abis": {
     "betrStaking": {
       "path": "./betr-staking.abi.json"
+    },
+    "betrRewards": {
+      "path": "./betr-rewards.abi.json"
     }
   },
   "instances": [
@@ -46,6 +49,12 @@
           }
         }
       }
+    },
+    {
+      "abi": "betrRewards",
+      "address": "0x2Fb46818b6A5F6fC349D2f73d145BeD6FCc58DB0",
+      "startBlock": 33842695,
+      "chain": "base"
     }
   ]
 }
