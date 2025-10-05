@@ -19,6 +19,10 @@ const config: HardhatUserConfig = {
       url: "https://mainnet.base.org",
       accounts: [vars.get("BETR_PRIVKEY")],
     },
+    arbitrum: {
+      url: "https://arb1.arbitrum.io/rpc",
+      accounts: [vars.get("BETR_PRIVKEY")],
+    },
     baseSepolia: {
       url: "https://sepolia.base.org",
       accounts: [vars.get("BETR_PRIVKEY")],

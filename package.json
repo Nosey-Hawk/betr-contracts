@@ -9,6 +9,7 @@
     "coverage": "SOLIDITY_COVERAGE=true hardhat coverage",
     "compile": "hardhat compile",
     "deploy:helper": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network base",
+    "deploy:helper:arb": "hardhat ignition deploy ./ignition/modules/BETRHelper.ts --network arbitrum",
     "deploy:erc20payer": "hardhat ignition deploy ./ignition/modules/BETRERC20Payer.ts --network base",
     "deploy:staking": "hardhat ignition deploy ./ignition/modules/BETRStaking.ts --network base --parameters ignition/parameters.json",
     "deploy:rewards": "hardhat ignition deploy ./ignition/modules/BETRRewards.ts --network base --parameters ignition/parameters.json",
